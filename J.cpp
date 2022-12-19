@@ -2,348 +2,295 @@
 //#include <iostream>
 //#include <fstream>
 //#include <vector>
+//#include <algorithm>
 //#include <random>
 //#include <cmath>
 
 using namespace std;
 
-struct Activity {
-    vector<int> rows;
-    int removed = -1; // уйдет в следующем слое
-    int added = -1; // пришел в этом слое
-};
+int n, p, d, k, rr;
+vector<vector<int>> c;
+vector<int> a;
+vector<int> a_rev;
+vector<pair<int, vector<bool>>> m; // index, mask
+vector<bool> g;
 
-struct Data {
-    double sum;
-    int parent;
-    int depth;
-};
+void construct_cyclic_classes() {
+    bool used[n];
 
-int n, k;
-vector<vector<bool>> g;
-vector<vector<bool>> gSpan;
-vector<Activity> activity_rows;
-vector<pair<int, int>> graph;
+    for (int i = 0; i < n; i++) {
+        used[i] = false;
+    }
+    used[0] = true;
+
+    int i = 1;
+    while (i < n) {
+        if (i >= d) {
+            return;
+        }
+
+        vector<int> curr;
+
+        int j = i;
+        while (!used[j]) {
+            curr.push_back(j);
+            used[j] = true;
+            j = (2 * j) % n;
+        }
+
+        if (!curr.empty()) {
+            c.push_back(curr);
+        }
+        i++;
+    }
+}
+
+void construct_alphas() {
+    a.push_back(1);
+    a_rev.push_back(-1);
+
+    for (int i = 1; i <= n; i++) {
+        int next = (a[i - 1] << 1);
+        if (next > n) {
+            next = (next ^ p) & n;
+        }
+
+        a.push_back(next);
+        a_rev.push_back(-1);
+    }
+
+    for (int i = 0; i <= n; i++) {
+        a_rev[a[i]] = i;
+    }
+}
+
+void construct_min_polynomes() {
+    construct_alphas();
+
+    for (int i = 0; i < c.size(); i++) {
+        int max_power = c[i].size();
+        vector<int> coefs[max_power + 1]; // степени a при x^i
+        vector<int> empty;
+        for (int j = 0; j <= max_power; j++) {
+            coefs[j] = empty;
+        }
+        coefs[0].push_back(c[i][0]);
+        coefs[1].push_back(0);
+
+        for (int j = 1; j < max_power; j++) {
+            // умножаем на (x + a^c[i][j]);
+
+            int curr_max_pow = -1;
+            vector<vector<int>> mul_x;
+            for (int i = 0; i <= max_power; i++) {
+                mul_x.push_back(empty);
+            }
+
+            // умножили на x
+            for (int q = max_power; q >= 0; q--) {
+                if (curr_max_pow == -1 && !coefs[q].empty()) {
+                    curr_max_pow = q;
+                }
+                if (q != 0) {
+                    mul_x[q] = coefs[q - 1];
+                }
+            }
+
+            // умножили на a^c[i][j]
+            for (int q = 0; q <= curr_max_pow; q++) {
+                for (int ii = 0; ii < coefs[q].size(); ii++) {
+                    coefs[q][ii] += c[i][j];
+                    coefs[q][ii] %= n;
+                }
+            }
+
+            // сложили два результата
+            for (int q = 0; q <= max_power; q++) {
+                for (int ii = 0; ii < mul_x[q].size(); ii++) {
+                    coefs[q].push_back(mul_x[q][ii]);
+                }
+            }
+        }
+
+        vector<bool> mask;
+        int index = c[i][0];
+
+        for (int j = 0; j <= max_power; j++) {
+            // получаем коефф при x^j
+
+            int now = 0;
+            for (int q = 0; q < coefs[j].size(); q++) {
+                now = now ^ a[coefs[j][q]];
+            }
+
+            assert(now == 1 || now == 0);
+
+            mask.push_back(now == 1);
+        }
+
+        m.emplace_back(index, mask);
+    }
+
+}
+
+void construct_g_polynome() {
+    construct_cyclic_classes();
+    construct_min_polynomes();
+
+    // умножение многочленов в столбик
+    g.push_back(true);
+
+    for (int i = 0; i < m.size(); i++) {
+        if (m[i].first >= d) {
+            break;
+        }
+        vector<bool> mask = m[i].second;
+
+        vector<bool> curr;
+        for (int ii = 0; ii < mask.size() + g.size() - 1; ii++) {
+            curr.push_back(false);
+        }
+
+        for (int im = 0; im < mask.size(); im++) {
+            if (mask[im]) {
+                for (int ig = 0; ig < g.size(); ig++) {
+                    curr[im + ig] = curr[im + ig] ^ g[ig];
+                }
+            }
+        }
+
+        g = curr;
+    }
+}
 
 vector<bool> encode(const vector<bool>& v) {
     vector<bool> res;
-
-    for (int j = 0; j < n; j++) {
-        res.push_back(false);
-        for (int i = 0; i < k; i++) {
-            res[j] = res[j] ^ (v[i] & g[i][j]);
-        }
-    }
-
-    return res;
-}
-
-void sum_matrix_rows(int row_from, int row_to) {
-    for (int j = 0; j < n; j++) {
-        gSpan[row_to][j] = gSpan[row_to][j] ^ gSpan[row_from][j];
-    }
-}
-
-void make_triangle(int curr_row) {
-    for (int i = curr_row + 1; i < k; i++) {
-        if (gSpan[i][curr_row]) {
-            if (!gSpan[curr_row][curr_row]) {
-                sum_matrix_rows(i, curr_row);
-            }
-            sum_matrix_rows(curr_row, i);
-        }
-    }
-}
-
-void make_unique_starts(int curr_column, bool used[]) {
-    int latest_true_row = -1;
-    for (int i = 0; i < k; i++) {
-        if (!used[i] && gSpan[i][curr_column]) {
-            if (latest_true_row == -1) {
-                latest_true_row = i;
-                continue;
-            }
-
-            for (int j = n - 1; j >= 0; j--) {
-                if (gSpan[i][j]) {
-                    sum_matrix_rows(latest_true_row, i);
-                    break;
-                }
-                if (gSpan[latest_true_row][j]) {
-                    sum_matrix_rows(i, latest_true_row);
-                    latest_true_row = i;
-                    break;
-                }
-            }
-
-        }
-    }
-
-    if (latest_true_row != -1) {
-        used[latest_true_row] = true;
-    }
-}
-
-void make_unique_ends(int curr_column, bool used[]) {
-    int latest_true_row = -1;
-    for (int i = k - 1; i >= 0; i--) {
-        if (!used[i] && gSpan[i][curr_column]) {
-            if (latest_true_row == -1) {
-                latest_true_row = i;
-                used[i] = true;
-                continue;
-            }
-
-            sum_matrix_rows(latest_true_row, i);
-        }
-    }
-}
-
-void construct_activities() {
-    vector<pair<int, int>> activity_range;
-    for (int i = 0; i < k; i++) {
-        int j_start = 0;
-        while (j_start < n && !gSpan[i][j_start]) {
-            j_start++;
-        }
-
-        int j_end = n - 1;
-        while (j_end >= 0 && !gSpan[i][j_end]) {
-            j_end--;
-        }
-
-        activity_range.emplace_back(j_start, j_end);
-    }
-
-    Activity empty_activity;
-    activity_rows.push_back(empty_activity);
-
-    for (int j = 0; j < n; j++) {
-        vector<int> active_rows;
-        int removed = -1;
-        int added = -1;
-
-        for (int i = 0; i < k; i++) {
-            if (activity_range[i].first <= j && j < activity_range[i].second) {
-                active_rows.push_back(i);
-            }
-            if (activity_range[i].first == j) {
-                added = i;
-            }
-            if (activity_range[i].second == j + 1) {
-                removed = i;
-            }
-        }
-
-        activity_rows.emplace_back(Activity{active_rows, removed, added});
-    }
-}
-
-void construct_span_matrix() {
-    for (int i = 0; i < k; i++) {
-        gSpan.push_back(g[i]);
-    }
-
-    bool used[k];
-
-    for (int i = 0; i < k; i++) {
-        make_triangle(i);
-        used[i] = false;
-    }
-
-    for (int j = n - 1; j >= 0; j--) {
-        make_unique_ends(j, used);
-    }
-
-    for (int i = 0; i < k; i++) {
-        used[i] = false;
-    }
-
-    for (int j = 0; j < n; j++) {
-        make_unique_starts(j, used);
-    }
-
-    construct_activities();
-}
-
-vector<bool> get_mask(int num, int power) {
-    vector<bool> res;
-
-    while (num > 0) {
-        res.push_back(num % 2 == 1);
-        num /= 2;
-    }
-
-    while (res.size() < power) {
+    for (int i = 0; i < rr; i++) {
         res.push_back(false);
     }
+    for (int i = 0; i < k; i++) {
+        res.push_back(v[i]);
+    }
 
-    return res;
-}
-
-vector<bool> gen_mask(int layer_num, const vector<bool>& mask, bool added_val) {
-    vector<bool> res;
-    size_t must_be = activity_rows[layer_num + 1].rows.size();
-
-    int i = 0;
-    int j = 0;
-    while (i < activity_rows[layer_num].rows.size() && j < activity_rows[layer_num + 1].rows.size()) {
-        if (activity_rows[layer_num].rows[i] == activity_rows[layer_num + 1].rows[j]) {
-            res.push_back(mask[i]);
-            i++; j++;
-        } else {
-            if (activity_rows[layer_num].removed == activity_rows[layer_num].rows[i]) {
-                if (activity_rows[layer_num + 1].added == activity_rows[layer_num + 1].rows[j]) {
-                    res.push_back(added_val);
-                    i++; j++;
-                } else {
-                    i++;
-                }
-            } else {
-                if (activity_rows[layer_num + 1].added == activity_rows[layer_num + 1].rows[j]) {
-                    res.push_back(added_val);
-                    j++;
-                }
+    // деление в столбик
+    vector<bool> reminder = res;
+    for (int i = res.size() - 1; i >= rr; i--) {
+        if (reminder[i]) {
+            for (int j = 0; j <= rr; j++) {
+                reminder[i - j] = reminder[i - j] ^ g[rr - j];
             }
         }
     }
 
-    while (res.size() < must_be && i < activity_rows[layer_num].rows.size()) {
-        res.push_back(mask[i]);
-        i++;
-    }
-
-    if (j < activity_rows[layer_num + 1].rows.size()) {
-        res.push_back(added_val);
+    for (int i = 0; i < rr; i++) {
+        res[i] = res[i] ^ reminder[i];
     }
 
     return res;
 }
 
-int parse_from_mask(const vector<bool>& mask, int power) {
-    int res = 0;
-    for (int i = 0; i < mask.size(); i++) {
-        if (mask[i]) {
-            res += (1 << i);
+vector<int> calc_syndrome(const vector<bool>& v) {
+    vector<int> s;
+    for (int j = 1; j <= d - 1; j++) {
+
+        int curr = 0;
+        for (int i = 0; i < n; i++) {
+            if (v[i]) {
+                curr = curr ^ a[(i * j) % n];
+            }
         }
+
+        s.push_back(curr);
     }
 
-    return res;
+    return s;
 }
 
-bool mul_two_vectors(const vector<bool>& a, const vector<bool>& b) {
-    bool res = false;
-
-    for (int i = 0; i < a.size(); i++) {
-        res = res ^ (a[i] & b[i]);
+int calc_in_module(int i, int j) {
+    if (i * j == 0) {
+        return 0;
     }
-
-    return res;
+    return a[(a_rev[i] + a_rev[j]) % n];
 }
 
-bool get_edge_val(int layer_num, const vector<bool>& now_mask, bool added_val) {
-    vector<pair<int, bool>> row_and_value;
-    int added_row = activity_rows[layer_num + 1].added;
+vector<bool> decode(const vector<bool>& v) {
+    vector<int> s = calc_syndrome(v);
 
-    if (added_row != -1) {
-        row_and_value.emplace_back(added_row, added_val);
-    }
+    int r = 1;
+    int mm = 0;
+    int L = 0;
+    vector<int> locators;
+    locators.push_back(1);
+    vector<int> b;
+    b.push_back(1);
 
-    for (int i = 0; i < activity_rows[layer_num].rows.size(); i++) {
-        row_and_value.emplace_back(activity_rows[layer_num].rows[i], now_mask[i]);
-    }
+    while (r <= d - 1) {
+        int delta = 0;
+        for (int j = 0; j <= L; j++) {
+            delta = delta ^ calc_in_module(locators[j], s[r - j - 1]);
+        }
 
-    vector<bool> from_gSpan;
-    vector<bool> from_vertexes;
-
-    for (int i = 0; i < row_and_value.size(); i++) {
-        int row = row_and_value[i].first;
-
-        from_gSpan.push_back(gSpan[row][layer_num]);
-        from_vertexes.push_back(row_and_value[i].second);
-    }
-
-    return mul_two_vectors(from_vertexes, from_gSpan);
-}
-
-void construct_graph() {
-    int vertexes_was = 0;
-
-    for (int i = 0; i < activity_rows.size() - 1; i++) {
-        int now_v_cnt = (int) activity_rows[i].rows.size();
-        int next_v_cnt = (int) activity_rows[i + 1].rows.size();
-
-        for (int j = 0; j < (1 << now_v_cnt); j++) {
-            pair<int, int> next_v = {-1, -1};
-            vector<bool> mask = get_mask(j, now_v_cnt);
-
-            vector<bool> new_mask = gen_mask(i, mask, false);
-            bool edge_val = get_edge_val(i, mask, false);
-            int parsed_num = parse_from_mask(new_mask, next_v_cnt);
-            if (edge_val) {
-                next_v.second = parsed_num + vertexes_was + (1 << now_v_cnt);
-            } else {
-                next_v.first = parsed_num + vertexes_was + (1 << now_v_cnt);
+        if (delta != 0) {
+            vector<int> t = locators;
+            for (int i = locators.size(); i < r - mm + b.size(); i++) {
+                t.push_back(0);
+            }
+            for (int i = 0; i < b.size(); i++) {
+                t[r - mm + i] = t[r - mm + i] ^ calc_in_module(delta, b[i]);
             }
 
-            if (activity_rows[i + 1].added != -1) {
-                new_mask = gen_mask(i, mask, true);
-                edge_val = get_edge_val(i, mask, true);
-                parsed_num = parse_from_mask(new_mask, next_v_cnt);
-                if (edge_val) {
-                    next_v.second = parsed_num + vertexes_was + (1 << now_v_cnt);
-                } else {
-                    next_v.first = parsed_num + vertexes_was + (1 << now_v_cnt);
+            if (2 * L <= r - 1) {
+                b.clear();
+                int delta_rev = a[(n - a_rev[delta]) % n];
+                for (int i = 0; i < locators.size(); i++) {
+                    b.push_back(calc_in_module(delta_rev, locators[i]));
                 }
+
+                L = r - L;
+                mm = r;
             }
 
-            graph.push_back(next_v);
+            locators = t;
         }
 
-        vertexes_was += (1 << now_v_cnt);
+        r++;
     }
 
-    graph.emplace_back(-1, -1);
+    if (L != locators.size() - 1) {
+        return v;
+    }
+
+    // ищем все a^(-i) == 0
+    vector<int> err_in;
+    for (int i = 0; i < n; i++) {
+        int curr = locators[0];
+        for (int j = 1; j < locators.size(); j++) {
+            curr = curr ^ calc_in_module(locators[j], a[(i * j) % n]);
+        }
+
+        if (curr == 0) {
+            err_in.push_back(i);
+        }
+    }
+
+    //a^(-i) = a^j => (n - i) % n = j
+    vector<bool> res = v;
+    for (int i = 0; i < err_in.size(); i++) {
+        res[(n - err_in[i]) % n] = !res[(n - err_in[i]) % n];
+    }
+
+    return res;
 }
 
-vector<bool> decode(const vector<double>& v) {
-    Data dp[graph.size()];
-    for (int i = 0; i < graph.size(); i++) {
-        dp[i] = Data{-1e9, -1, -1};
-    }
-
-    dp[0] = Data{0, -1, 0};
-    for (int i = 0; i < graph.size(); i++) {
-        double now_sum = dp[i].sum;
-        int now_depth = dp[i].depth;
-        auto data = graph[i];
-
-        if (data.first != -1 && dp[data.first].sum < now_sum + v[now_depth]) {
-            dp[data.first] = {now_sum + v[now_depth], i, now_depth + 1};
-        }
-
-        if (data.second != -1 && dp[data.second].sum < now_sum - v[now_depth]) {
-            dp[data.second] = {now_sum - v[now_depth], i, now_depth + 1};
-        }
-    }
-
-    int curr = (int) graph.size() - 1;
-    vector<bool> res;
-    while (dp[curr].parent != -1) {
-        int before = dp[curr].parent;
-        res.push_back(graph[before].second == curr);
-        curr = before;
-    }
-
-    reverse(res.begin(), res.end());
-    return res;
+double get_rand() {
+    return (double) rand() / (RAND_MAX);
 }
 
 vector<bool> gen_word() {
     vector<bool> res;
 
-    for (int i = 0; i < k; i++) {
-        int rand_gen = round(((double) rand() / (RAND_MAX)));
+    for (int i = 0; i < rr; i++) {
+        int rand_gen = round(get_rand());
         res.push_back(rand_gen == 1);
     }
 
@@ -364,10 +311,9 @@ double simulate(double noise_lvl, int num_of_operations, int max_errors) {
         vector<bool> word = gen_word();
         vector<bool> encoded_word = encode(word);
 
-        vector<double> converted_word;
-        for (int i = 0; i < encoded_word.size(); i++) {
-            converted_word.push_back(encoded_word[i] ? -1.0 : 1.0);
-            converted_word[i] += nd(gen);
+        vector<bool> converted_word;
+        for (int i = 0; i < n; i++) {
+            converted_word.push_back(get_rand() <= noise_lvl ? !encoded_word[i] : encoded_word[i]);
         }
 
         vector<bool> decoded_word = decode(converted_word);
@@ -394,23 +340,16 @@ int main() {
     in.tie(0);
     out.tie(0);
 
-    in >> n >> k;
+    in >> n >> p >> d;
 
-    vector<bool> empty;
-    for (int i = 0; i < k; i++) {
-        g.push_back(empty);
-        for (int j = 0; j < n; j++) {
-            int x;
-            in >> x;
-            g[i].push_back(x == 1);
-        }
-    }
+    construct_g_polynome();
 
-    construct_span_matrix();
-    construct_graph();
+    rr = g.size() - 1;
+    k = n - rr;
 
-    for (int i = 0; i < activity_rows.size(); i++) {
-        out << (1 << activity_rows[i].rows.size()) << " ";
+    out << k << "\n";
+    for (int i = 0; i <= rr; i++) {
+        out << (g[i] ? 1 : 0) << " ";
     }
 
     string s;
@@ -430,11 +369,11 @@ int main() {
             }
 
         } else if (s[0] == 'D') {
-            vector<double> v;
+            vector<bool> v;
             for (int i = 0; i < n; i++) {
-                double x;
+                int x;
                 in >> x;
-                v.push_back(x);
+                v.push_back(x == 1);
             }
 
             for (bool val : decode(v)) {
