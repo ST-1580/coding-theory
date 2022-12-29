@@ -1,28 +1,28 @@
-//#include <bits/stdc++.h>
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <algorithm>
-#include <random>
-#include <cmath>
+#include <bits/stdc++.h>
 
 using namespace std;
 
 int n, p, d, k, rr;
-vector<int> a;
-vector<int> a_rev;
-vector<int> g;
+vector<int> a;      // предподсчитанные alphas
+vector<int> a_rev;  // вектор, a_rev[i] = x => a^x = i
+vector<int> g;      // порождающий многочлен
 
+// строим альфы
 void construct_alphas() {
     a.push_back(1);
     a_rev.push_back(0);
 
+    // a[i] = (a[i - 1] * x) % p
     for (int i = 1; i <= n; i++) {
         int next = (a[i - 1] << 1);
         if (next > n) {
+            // взятие по модулю
+            // поскольку n = 2^m - 1, то его битовая маска - все единицы
+            // поэтому можно "обрубить" ненужные биты при помощи логического и
             next = (next ^ p) & n;
         }
 
+        // заполняем a_rev
         a.push_back(next);
         a_rev.push_back(-1);
     }
@@ -36,24 +36,35 @@ void construct_alphas() {
 void construct_g_polynome() {
     construct_alphas();
 
-    vector<int> coefs[d]; // степени a при x^i
+    // степени aльф при x^i
+    vector<int> coefs[d];
+    // вспомогательный пустой массив
     vector<int> empty;
     for (int j = 0; j < d; j++) {
         coefs[j] = empty;
     }
+
+    // проиницилизируем коэффициенты первым множителем (x + a^1)
     coefs[0].push_back(1);
     coefs[1].push_back(0);
 
     for (int j = 2; j < d; j++) {
-        // умножаем на (x + a^j);
+        // умножаем на (x + a^j)
+        // будем делать это в три этапа
+        // 1 - умножим на х
+        // 2 - умножим на a^j
+        // 3 - сложим полученные значения
 
+        // текущая максимальная степень
         int curr_max_pow = -1;
+
+        // вспомогательный вектор для умножения на х
         vector<vector<int>> mul_x;
         for (int i = 0; i < d; i++) {
             mul_x.push_back(empty);
         }
 
-        // умножили на x
+        // умножим на x, для этого просто сдвинем все коэффициенты
         for (int q = d - 1; q >= 0; q--) {
             if (curr_max_pow == -1 && !coefs[q].empty()) {
                 curr_max_pow = q;
@@ -63,7 +74,7 @@ void construct_g_polynome() {
             }
         }
 
-        // умножили на a^j
+        // умножим на a^j
         for (int q = 0; q <= curr_max_pow; q++) {
             for (int ii = 0; ii < coefs[q].size(); ii++) {
                 coefs[q][ii] += j;
@@ -71,15 +82,16 @@ void construct_g_polynome() {
             }
         }
 
-        // сложили два результата
+        // сложим два результата
         for (int q = 0; q < d; q++) {
             for (int ii = 0; ii < mul_x[q].size(); ii++) {
                 coefs[q].push_back(mul_x[q][ii]);
             }
         }
 
+        // для ускорения работы сократим степени альф
         for (int q = 0; q < d; q++) {
-
+            // текущий результат
             int now = 0;
             for (int ii = 0; ii < coefs[q].size(); ii++) {
                 now = now ^ a[coefs[q][ii]];
@@ -92,9 +104,10 @@ void construct_g_polynome() {
         }
     }
 
+    // собираем порождающий многочлен
     for (int j = 0; j < d; j++) {
-        // получаем коефф при x^j
 
+        // получаем коефф при x^j
         int now = 0;
         for (int q = 0; q < coefs[j].size(); q++) {
             now = now ^ a[coefs[j][q]];
@@ -104,6 +117,7 @@ void construct_g_polynome() {
     }
 }
 
+// вспомогательная функция для умножения в поле
 int mul_in_module(int i, int j) {
     if (i * j == 0) {
         return 0;
@@ -111,6 +125,9 @@ int mul_in_module(int i, int j) {
     return a[(a_rev[i] + a_rev[j]) % n];
 }
 
+// вспомогательная функция для деления в поле
+// up - числитель
+// down - знаменатель
 int div_in_module(int up, int down) {
     if (up * down == 0) {
         return 0;
@@ -118,7 +135,9 @@ int div_in_module(int up, int down) {
     return a[(a_rev[up] - a_rev[down] + n) % n];
 }
 
+// вспомогательная функция для стирания ведущих нулей в коэффициентах многочлена
 vector<int> clean_polynome(vector<int>& v) {
+    // число нулей
     int cnt = 0;
     for (int i = v.size() - 1; i >= 0; i--) {
         if (v[i] != 0) {
@@ -128,6 +147,7 @@ vector<int> clean_polynome(vector<int>& v) {
             cnt++;
         }
     }
+
     if (cnt != 0) {
         v.erase(v.end() - cnt, v.end());
     }
@@ -135,6 +155,10 @@ vector<int> clean_polynome(vector<int>& v) {
     return v;
 }
 
+// деление многочленов в столбик
+// вернет результат и остаток
+// up - числитель
+// down - знаменатель
 pair<vector<int>, vector<int>> div(const vector<int>& up, const vector<int>& down) {
     vector<int> reminder = up;
     vector<int> res;
@@ -160,6 +184,7 @@ pair<vector<int>, vector<int>> div(const vector<int>& up, const vector<int>& dow
     return {clean_polynome(res), clean_polynome(reminder)};
 }
 
+// умножение многочленов в столбик
 vector<int> mul(const vector<int>& aa, const vector<int>& b) {
     vector<int> res;
     for (int i = 0; i < aa.size() + b.size() - 1; i++) {
@@ -168,9 +193,9 @@ vector<int> mul(const vector<int>& aa, const vector<int>& b) {
 
     for (int i = 0; i < aa.size(); i++) {
         if (aa[i] > 0) {
-           for (int j = 0; j < b.size(); j++) {
-               res[i + j] = res[i + j] ^ mul_in_module(aa[i], b[j]);
-           }
+            for (int j = 0; j < b.size(); j++) {
+                res[i + j] = res[i + j] ^ mul_in_module(aa[i], b[j]);
+            }
         }
     }
 
@@ -178,6 +203,7 @@ vector<int> mul(const vector<int>& aa, const vector<int>& b) {
 }
 
 vector<int> encode(const vector<int>& v) {
+    // res = v * x^rr + reminder
     vector<int> res;
     for (int i = 0; i < rr; i++) {
         res.push_back(0);
@@ -186,8 +212,10 @@ vector<int> encode(const vector<int>& v) {
         res.push_back(v[i]);
     }
 
+    // поиск остатка
     vector<int> reminder = div(res, g).second;
 
+    // прибавление остатка
     for (int i = 0; i < rr; i++) {
         int reminder_val = i >= reminder.size() ? 0 : reminder[i];
         res[i] = res[i] ^ reminder_val;
@@ -196,10 +224,11 @@ vector<int> encode(const vector<int>& v) {
     return res;
 }
 
+// подсчет синдрома
 vector<int> calc_syndrome(const vector<int>& v) {
     vector<int> s;
     for (int j = 1; j < d; j++) {
-
+        // s_j = v(a^j)
         int curr = 0;
         for (int i = 0; i < n; i++) {
             curr = curr ^ mul_in_module(v[i], a[(i * j) % n]);
@@ -214,6 +243,7 @@ vector<int> calc_syndrome(const vector<int>& v) {
 vector<int> decode(const vector<int>& v) {
     vector<int> s = calc_syndrome(v);
 
+    // инициализация
     vector<int> r_pre_last;
     vector<int> r_last = s;
     vector<int> a_pre_last;
@@ -227,6 +257,7 @@ vector<int> decode(const vector<int>& v) {
     a_last.push_back(1);
     a_pre_last.push_back(0);
 
+    // алгоритм Сугиямы (Евклида)
     while (r_last.size() - 1 >= rr / 2) {
         auto res = div(r_pre_last, r_last);
         vector<int> q = res.first;
@@ -246,6 +277,7 @@ vector<int> decode(const vector<int>& v) {
         a_last = a_now;
     }
 
+    // поиск коэффициента не равного 0
     vector<int> val;
     for (int i = 0; i < a_last.size(); i++) {
         if (a_last[i] != 0) {
@@ -254,18 +286,21 @@ vector<int> decode(const vector<int>& v) {
         }
     }
 
+    // нахождение многочлена локаторов
     vector<int> locators = div(a_last, val).first;
 
+    // вектор x^2t
     vector<int> x_2t;
     for (int i = 0; i < d - 1; i++) {
         x_2t.push_back(0);
     }
     x_2t.push_back(1);
 
+    // нахождение омеги
     vector<int> omega_without_module = mul(s, locators);
     vector<int> omega = div(omega_without_module, x_2t).second;
 
-    // ищем все a^(-i) == 0
+    // поиск ошибок: ищем все a^(-i) == 0
     vector<int> err_in;
     for (int i = 0; i < n; i++) {
         int curr = locators[0];
@@ -274,15 +309,19 @@ vector<int> decode(const vector<int>& v) {
         }
 
         if (curr == 0) {
+            // необходимо перевести -i в j
+            // a^(-i) = a^j => (n - i) % n = j
             err_in.push_back((n - i) % n);
         }
     }
 
-    //aлгоритм Форни
+    // aлгоритм Форни
     vector<int> res = v;
     for (int i = 0; i < err_in.size(); i++) {
+        // инвертируем
         int x_rev = div_in_module(1, a[err_in[i]]);
 
+        // числитель
         int up = 0;
         int now_pow_val = 1;
         for (int j = 0; j < omega.size(); j++) {
@@ -291,6 +330,7 @@ vector<int> decode(const vector<int>& v) {
         }
         up = mul_in_module(x_rev, up);
 
+        // знаменатель
         int down = 1;
         for (int j = 0; j < err_in.size(); j++) {
             if (err_in[i] != err_in[j]) {
@@ -298,20 +338,24 @@ vector<int> decode(const vector<int>& v) {
             }
         }
 
+        // исправляем ошибки
         res[err_in[i]] = res[err_in[i]] ^ div_in_module(up, down);
     }
 
     return res;
 }
 
+// генерация рандома от 0 до 1
 double get_rand() {
     return (double) rand() / (RAND_MAX);
 }
 
+// генерация рандома от 0 до n
 int get_rand_int_to_n() {
     return (int) round(get_rand() * n) % n;
 }
 
+// генерация вектора для encode
 vector<int> gen_word() {
     vector<int> res;
 
@@ -339,11 +383,13 @@ double simulate(double noise_lvl, int num_of_operations, int max_errors) {
 
         vector<int> converted_word;
         for (int i = 0; i < n; i++) {
+            // случайное изменение бита
             converted_word.push_back(get_rand() <= noise_lvl ? encoded_word[i] ^ a[get_rand_int_to_n()] : encoded_word[i]);
         }
 
         vector<int> decoded_word = decode(converted_word);
 
+        // проверка
         for (int i = 0; i < encoded_word.size(); i++) {
             if (encoded_word[i] != decoded_word[i]) {
                 curr_errors++;
@@ -357,10 +403,8 @@ double simulate(double noise_lvl, int num_of_operations, int max_errors) {
 }
 
 int main() {
-    ifstream in("/Users/st1580/CLionProjects/professional/input.txt");
-    ofstream out("/Users/st1580/CLionProjects/professional/output.txt");
-//    ifstream in("input.txt");
-//    ofstream out("output.txt");
+    ifstream in("input.txt");
+    ofstream out("output.txt");
 
     ios_base::sync_with_stdio(false);
     in.tie(0);

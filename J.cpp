@@ -1,21 +1,17 @@
 #include <bits/stdc++.h>
-//#include <iostream>
-//#include <fstream>
-//#include <vector>
-//#include <algorithm>
-//#include <random>
-//#include <cmath>
 
 using namespace std;
 
 int n, p, d, k, rr;
-vector<vector<int>> c;
-vector<int> a;
-vector<int> a_rev;
-vector<pair<int, vector<bool>>> m; // index, mask
-vector<bool> g;
+vector<vector<int>> c;             // циклотомические классы
+vector<int> a;                     // предподсчитанные alphas
+vector<int> a_rev;                 // вектор, a_rev[i] = x => a^x = i
+vector<pair<int, vector<bool>>> m; // минимвльные многочлены: first - индекс, second - битовая маска
+vector<bool> g;                    // порождающий многочлен
 
+// строим циклотомические классы
 void construct_cyclic_classes() {
+    // какие значения уже лежат в циклотомических классах
     bool used[n];
 
     for (int i = 0; i < n; i++) {
@@ -24,6 +20,7 @@ void construct_cyclic_classes() {
     used[0] = true;
 
     int i = 1;
+    // поскольку в будущем нам потребуются только M_1 ... M_d-1, то можно не считать ненужные классы
     while (i < n) {
         if (i >= d) {
             return;
@@ -45,13 +42,19 @@ void construct_cyclic_classes() {
     }
 }
 
+// строим альфы
 void construct_alphas() {
     a.push_back(1);
     a_rev.push_back(-1);
 
+    // a[i] = (a[i - 1] * x) % p
     for (int i = 1; i <= n; i++) {
+        // умножение на x
         int next = (a[i - 1] << 1);
         if (next > n) {
+            // взятие по модулю
+            // поскольку n = 2^m - 1, то его битовая маска - все единицы
+            // поэтому можно "обрубить" ненужные биты при помощи логического и
             next = (next ^ p) & n;
         }
 
@@ -59,34 +62,49 @@ void construct_alphas() {
         a_rev.push_back(-1);
     }
 
+    // заполняем a_rev
     for (int i = 0; i <= n; i++) {
         a_rev[a[i]] = i;
     }
 }
 
+// строим минимальные многочлены
 void construct_min_polynomes() {
     construct_alphas();
 
     for (int i = 0; i < c.size(); i++) {
+        // итоговая степень текущего минимального многочлена
         int max_power = c[i].size();
-        vector<int> coefs[max_power + 1]; // степени a при x^i
+        // степени aльф при x^i
+        vector<int> coefs[max_power + 1];
+        // вспомогательный пустой массив
         vector<int> empty;
         for (int j = 0; j <= max_power; j++) {
             coefs[j] = empty;
         }
+
+        // поскольку каждый цикломатический класс содержит как минимум одно число - свой индекс
+        // то проиницилизируем коэффициенты первым множителем (x + a^c[i][0])
         coefs[0].push_back(c[i][0]);
         coefs[1].push_back(0);
 
         for (int j = 1; j < max_power; j++) {
-            // умножаем на (x + a^c[i][j]);
+            // умножаем на (x + a^c[i][j])
+            // будем делать это в три этапа
+            // 1 - умножим на х
+            // 2 - умножим на a^c[i][j]
+            // 3 - сложим полученные значения
 
+            // текущая максимальная степень
             int curr_max_pow = -1;
+
+            // вспомогательный вектор для умножения на х
             vector<vector<int>> mul_x;
             for (int i = 0; i <= max_power; i++) {
                 mul_x.push_back(empty);
             }
 
-            // умножили на x
+            // умножим на x, для этого просто сдвинем все коэффициенты
             for (int q = max_power; q >= 0; q--) {
                 if (curr_max_pow == -1 && !coefs[q].empty()) {
                     curr_max_pow = q;
@@ -96,7 +114,7 @@ void construct_min_polynomes() {
                 }
             }
 
-            // умножили на a^c[i][j]
+            // умножим на a^c[i][j]
             for (int q = 0; q <= curr_max_pow; q++) {
                 for (int ii = 0; ii < coefs[q].size(); ii++) {
                     coefs[q][ii] += c[i][j];
@@ -104,7 +122,7 @@ void construct_min_polynomes() {
                 }
             }
 
-            // сложили два результата
+            // сложим два результата
             for (int q = 0; q <= max_power; q++) {
                 for (int ii = 0; ii < mul_x[q].size(); ii++) {
                     coefs[q].push_back(mul_x[q][ii]);
@@ -112,45 +130,51 @@ void construct_min_polynomes() {
             }
         }
 
+        // на текущем этапе у нас готов вектор коэффициентов
+        // необходимо при помощи него получить минимальный многочлен
+
         vector<bool> mask;
         int index = c[i][0];
 
         for (int j = 0; j <= max_power; j++) {
-            // получаем коефф при x^j
 
+            // получаем коефф при x^j
             int now = 0;
             for (int q = 0; q < coefs[j].size(); q++) {
                 now = now ^ a[coefs[j][q]];
             }
 
+            // проверка для себя
             assert(now == 1 || now == 0);
 
             mask.push_back(now == 1);
         }
 
+        // добавляем минимальный многочлен
         m.emplace_back(index, mask);
     }
-
 }
 
+// посторение порождающего многочлена
 void construct_g_polynome() {
     construct_cyclic_classes();
     construct_min_polynomes();
 
-    // умножение многочленов в столбик
+    // необходимо перемножить M_1 ... M_d-1
+    // будем умножать многочлены в столбик
+    // для удобства проинициализируем g единицей
     g.push_back(true);
 
     for (int i = 0; i < m.size(); i++) {
-        if (m[i].first >= d) {
-            break;
-        }
         vector<bool> mask = m[i].second;
 
+        // вспомогательный вектор
         vector<bool> curr;
         for (int ii = 0; ii < mask.size() + g.size() - 1; ii++) {
             curr.push_back(false);
         }
 
+        // умножение в столбик
         for (int im = 0; im < mask.size(); im++) {
             if (mask[im]) {
                 for (int ig = 0; ig < g.size(); ig++) {
@@ -164,6 +188,7 @@ void construct_g_polynome() {
 }
 
 vector<bool> encode(const vector<bool>& v) {
+    // res = v * x^rr + reminder
     vector<bool> res;
     for (int i = 0; i < rr; i++) {
         res.push_back(false);
@@ -182,6 +207,7 @@ vector<bool> encode(const vector<bool>& v) {
         }
     }
 
+    // прибавление остатка
     for (int i = 0; i < rr; i++) {
         res[i] = res[i] ^ reminder[i];
     }
@@ -189,10 +215,11 @@ vector<bool> encode(const vector<bool>& v) {
     return res;
 }
 
+// подсчет синдрома
 vector<int> calc_syndrome(const vector<bool>& v) {
     vector<int> s;
     for (int j = 1; j <= d - 1; j++) {
-
+        // s_j = v(a^j)
         int curr = 0;
         for (int i = 0; i < n; i++) {
             if (v[i]) {
@@ -206,7 +233,8 @@ vector<int> calc_syndrome(const vector<bool>& v) {
     return s;
 }
 
-int calc_in_module(int i, int j) {
+// вспомогательная функция для умножения в поле
+int mul_in_module(int i, int j) {
     if (i * j == 0) {
         return 0;
     }
@@ -216,6 +244,7 @@ int calc_in_module(int i, int j) {
 vector<bool> decode(const vector<bool>& v) {
     vector<int> s = calc_syndrome(v);
 
+    // инициализация
     int r = 1;
     int mm = 0;
     int L = 0;
@@ -224,10 +253,11 @@ vector<bool> decode(const vector<bool>& v) {
     vector<int> b;
     b.push_back(1);
 
+    // алгоритм Берлекэмпа-Месси с лекции
     while (r <= d - 1) {
         int delta = 0;
         for (int j = 0; j <= L; j++) {
-            delta = delta ^ calc_in_module(locators[j], s[r - j - 1]);
+            delta = delta ^ mul_in_module(locators[j], s[r - j - 1]);
         }
 
         if (delta != 0) {
@@ -236,14 +266,14 @@ vector<bool> decode(const vector<bool>& v) {
                 t.push_back(0);
             }
             for (int i = 0; i < b.size(); i++) {
-                t[r - mm + i] = t[r - mm + i] ^ calc_in_module(delta, b[i]);
+                t[r - mm + i] = t[r - mm + i] ^ mul_in_module(delta, b[i]);
             }
 
             if (2 * L <= r - 1) {
                 b.clear();
                 int delta_rev = a[(n - a_rev[delta]) % n];
                 for (int i = 0; i < locators.size(); i++) {
-                    b.push_back(calc_in_module(delta_rev, locators[i]));
+                    b.push_back(mul_in_module(delta_rev, locators[i]));
                 }
 
                 L = r - L;
@@ -260,32 +290,36 @@ vector<bool> decode(const vector<bool>& v) {
         return v;
     }
 
-    // ищем все a^(-i) == 0
+    // поиск ошибок: ищем все a^(-i) == 0
     vector<int> err_in;
     for (int i = 0; i < n; i++) {
         int curr = locators[0];
         for (int j = 1; j < locators.size(); j++) {
-            curr = curr ^ calc_in_module(locators[j], a[(i * j) % n]);
+            curr = curr ^ mul_in_module(locators[j], a[(i * j) % n]);
         }
 
         if (curr == 0) {
-            err_in.push_back(i);
+            // необходимо перевести -i в j
+            // a^(-i) = a^j => (n - i) % n = j
+            err_in.push_back((n - i) % n);
         }
     }
 
-    //a^(-i) = a^j => (n - i) % n = j
+    // инвертирование ошибочных битов
     vector<bool> res = v;
     for (int i = 0; i < err_in.size(); i++) {
-        res[(n - err_in[i]) % n] = !res[(n - err_in[i]) % n];
+        res[err_in[i]] = !res[err_in[i]];
     }
 
     return res;
 }
 
+// генерация рандома от 0 до 1
 double get_rand() {
     return (double) rand() / (RAND_MAX);
 }
 
+// генерация вектора для encode
 vector<bool> gen_word() {
     vector<bool> res;
 
@@ -313,11 +347,13 @@ double simulate(double noise_lvl, int num_of_operations, int max_errors) {
 
         vector<bool> converted_word;
         for (int i = 0; i < n; i++) {
+            // случайное инвертирование бита
             converted_word.push_back(get_rand() <= noise_lvl ? !encoded_word[i] : encoded_word[i]);
         }
 
         vector<bool> decoded_word = decode(converted_word);
 
+        // проверка
         for (int i = 0; i < encoded_word.size(); i++) {
             if (encoded_word[i] != decoded_word[i]) {
                 curr_errors++;
@@ -331,8 +367,6 @@ double simulate(double noise_lvl, int num_of_operations, int max_errors) {
 }
 
 int main() {
-//    ifstream in("/Users/st1580/CLionProjects/professional/input.txt");
-//    ofstream out("/Users/st1580/CLionProjects/professional/output.txt");
     ifstream in("input.txt");
     ofstream out("output.txt");
 
